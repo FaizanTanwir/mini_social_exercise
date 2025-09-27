@@ -892,6 +892,8 @@ def recommend(user_id, filter_following):
 
     recommended_posts = {} 
 
+    #to be solved yet.
+
     return recommended_posts;
 
 # Task 3.2
