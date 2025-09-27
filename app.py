@@ -938,6 +938,8 @@ def moderate_content(content):
 
     moderated_content = content
     score = 0
+
+    # to be solved
     
     return moderated_content, score
 
