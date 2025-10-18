@@ -887,11 +887,77 @@ def moderate_content(content):
     Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
 
-    moderated_content = content
+    original_content = content
     score = 0
 
-    # to be solved
-    
+    ''' Rule 1.2.1 (Tier 3 Phrases in the original text) '''
+    # Define a regex pattern that matches any whole word in the content that is on the tier 3 list
+    TIER3_PATTERN = r'\b(' + '|'.join(TIER3_WORDS) + r')\b'
+    # Run the regex to find all the matching words
+    matches = re.findall(TIER3_PATTERN, original_content, flags=re.IGNORECASE)
+    # 2 points for each match as per rule 1.2.1
+    score += len(matches) * 2
+    # Using the same regex, we replace all words with *
+    moderated_content = re.sub(TIER3_PATTERN, lambda m: '*' * len(m.group(0)), original_content, flags=re.IGNORECASE)
+
+    ''' Rule 1.2.2 (External links in the original text) '''
+    # Define a regex pattern that matches any whole word in the content that contain an external link
+    URL_PATTERN = r'(https?://)?(www\.)?[\w]+\.[\w]+(\/[\S]*)?'
+    # Run the regex to find all the matching link pattern
+    matches = re.findall(URL_PATTERN , moderated_content)
+    # 2 points for each match as per rule 1.2.2
+    score += len(matches) * 2.0
+    # Using the same regex, we replace link with the following text
+    moderated_content = re.sub(URL_PATTERN, '[link removed]', moderated_content)
+
+    ''' Rule 1.2.3 (Excessive Capitalization in the original text) '''
+    letters = []
+    for char in original_content:
+        if char.isalpha():
+            letters.append(char)
+
+    capital_letters = []
+    for char in original_content:
+        if char.isupper():
+            capital_letters.append(char)
+
+    # 0.5 points for 70% capitalized alphabets used as per rule 1.2.3
+    if len(letters) > 15:
+        if (len(capital_letters) / len(letters)) > 0.7:
+            score += 0.5
+
+    ''' Rule 1.3.1 (Penalize Hate Speech or Threats)'''
+    TOXIC_ELEMENTS = [ 'loser', 'idiot', 'pathetic', 'troll', 'racism', 'xenophobia',
+    'mocking', 'degrade', 'shaming', 'unwelcome', 'destroy', 'inferior']
+
+    # Define a regex pattern that matches any whole word in the content that contains toxic sentiment
+    TOXIC_PATTERN = r'\b(' + '|'.join(TOXIC_ELEMENTS) + r')\b'
+    # Run the regex to find all the matching words
+    matches = re.findall(TOXIC_PATTERN, moderated_content, flags=re.IGNORECASE)
+    # 1 points penalty for each match as per the custom rule
+    score += len(matches) * 1
+
+    ''' Rule 1.1.2 (Tier 2 Phrases in the original text) '''
+    # Define a regex pattern that matches any whole word in the content that is on the tier 2 list
+    TIER2_PATTERN = r'\b(' + '|'.join(TIER2_PHRASES) + r')\b'
+    # Run the regex to find all the matching words
+    if re.findall(TIER2_PATTERN, original_content, flags=re.IGNORECASE):
+        # 2 points for each match as per rule 1.1.2
+        score += 5
+        # Using the same regex, we replace the word with the message below:
+        moderated_content = '[content removed due to spam/scam policy]'
+
+    ''' Rule 1.1.1 (Tier 1 Phrases in the original text) '''
+    # Define a regex pattern that matches any whole word in the content that is on the tier 1 list
+    TIER1_PATTERN = r'\b(' + '|'.join(TIER1_WORDS) + r')\b'
+    # Run the regex to find all the matching words
+    if re.findall(TIER1_PATTERN, original_content, flags=re.IGNORECASE):
+        # 2 points for each match as per rule 1.1.1
+        score += 5
+        # Using the same regex, we replace the word with the message below:
+        moderated_content = '[content removed due to severe violation]'
+
+    # Return the updated content string and the score
     return moderated_content, score
 
 # Task 3.2
