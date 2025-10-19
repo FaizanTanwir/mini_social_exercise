@@ -974,12 +974,117 @@ def user_risk_analysis(user_id):
             password: admin
         Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
-
-    # to be solved yet
     
-    score = 0
+    user_risk_score = 0
 
-    return score;
+    user_profile = query_db('''SELECT id, 
+                                    username, 
+                                    profile, 
+                                    ROUND(JULIANDAY('now') - JULIANDAY(created_at)) AS created_since 
+                                FROM users
+                                WHERE id = ?
+                            ''', (user_id,), one=True)
+
+    if user_profile is not None: # since query_db() return list of dictonaries or None
+        name = user_profile['username']
+        bio = user_profile['profile'] or "" # to capture users with no bio
+        account_age_days = user_profile['created_since']
+    else:
+        print(f"Warning: User ID {user_id} not found.")
+        return 0.0
+
+    print(f"Current user: {user_id} - {name}. Created account {account_age_days} days ago")
+        
+    ''' Profile Scores'''
+    moderated_content, profile_score = moderate_content(bio)
+    print(f"Profile score of user {user_id} is {profile_score}")
+
+    ''' Post Scores'''
+    average_post_score = 0
+    post_base_score = 0
+    post_scores = []
+
+    user_posts = query_db('SELECT content FROM posts WHERE user_id = ?', (user_id,))
+    
+    if user_posts:
+        for post in user_posts:
+            moderated_content, post_base_score = moderate_content(post['content'])
+            post_scores.append(post_base_score)
+        average_post_score = sum(post_scores) / len(post_scores)
+    else:
+        average_post_score = 0
+    print(f"Average post score of user {user_id} is {average_post_score}")
+
+    ''' Comment Scores'''
+    average_comment_score = 0
+    comment_base_score = 0
+    comment_scores = []
+
+    user_comments = query_db('SELECT content FROM comments WHERE user_id = ?', (user_id,))
+    
+    if user_comments:
+        for comment in user_comments:
+            moderated_content, comment_base_score = moderate_content(comment['content'])
+            comment_scores.append(comment_base_score)
+        average_comment_score = sum(comment_scores) / len(comment_scores)
+    else:
+        average_comment_score = 0
+    print(f"Average comment score of user {user_id} is {average_comment_score}")
+
+    ''' Content Risk Scores'''
+    content_risk_score = (profile_score * 1) + (average_post_score * 3) + (average_comment_score * 1)
+    print(f"Content risk score of user {user_id} is {content_risk_score}")
+
+    ''' User Risk Scores'''
+    if account_age_days < 7:
+        user_risk_score = content_risk_score * 1.5
+    elif account_age_days >=7 and account_age_days< 30:
+        user_risk_score = content_risk_score * 1.2
+    else:
+        user_risk_score = content_risk_score
+    print(f"User risk score of user {user_id} is {user_risk_score}")
+
+    ''' User Risk increment based on negative reactions on the posts of a high risk user'''
+    # I have devised a custom rule for such high-risk users who frequently (>=30%) gets angry reactions 
+    # on their posts and have user risk more than 3; indicating the element of hate and offense in their posts.
+    total_reactions = 0
+    angry_reactions = 0
+
+    # Counting all the reactions on this user's posts
+    user_posts_for_reactions = query_db('SELECT id FROM posts WHERE user_id = ?', (user_id,))
+    if user_posts_for_reactions:
+        for post in user_posts_for_reactions:
+            post_id = post['id']
+
+            reaction_counts = query_db('''
+                SELECT reaction_type, COUNT(*) AS reaction_count
+                FROM reactions
+                WHERE post_id = ?
+                GROUP BY reaction_type
+            ''', (post_id,))
+
+            if reaction_counts:
+                for reaction in reaction_counts:
+                    total_reactions += reaction['reaction_count']
+                    if reaction['reaction_type'] == 'angry':
+                        angry_reactions += reaction['reaction_count']
+
+    if total_reactions > 0:
+        angry_ratio = angry_reactions / total_reactions
+        print(f"User {user_id}: Angry reaction ratio = {angry_ratio:.2f}")
+
+        if angry_ratio >= 0.3 and user_risk_score > 3:
+            user_risk_score += 0.5
+            print(f"User {user_id} penalized (+0.5) for high angry reactions on their post.")
+            print(f"Updated user risk score of user {user_id} is {user_risk_score}")
+
+    ''' User Risk Scores cap at 5'''
+    if user_risk_score > 5.0:
+        user_risk_score = 5.0
+
+    print(f"Capped user risk score of user {user_id} is {user_risk_score}")
+
+    return user_risk_score;
 
 # Task 3.3
 def recommend(user_id, filter_following):
