@@ -1109,9 +1109,6 @@ def recommend(user_id, filter_following):
 
     recommended_posts = []
 
-    'The code below is almost the same that of given in the solution of Exercise 13. '
-    'Only few changes were required in the original code to attain the objective of Homework 3 Task 3.'
-    
     ''' Prioriting the posts which were positively reacted by the user.'''
     liked_posts_content = query_db('''
         SELECT p.content 
@@ -1121,21 +1118,18 @@ def recommend(user_id, filter_following):
         WHERE r.user_id = ? AND r.reaction_type IN ('like','love','haha')
     ''', (user_id,))
 
-    ''' If no posts were liked. Recommending the latest posts of the followed user.'''
-    if not liked_posts_content:
-        followed_posts_content = query_db('''
-            SELECT p.id, p.content, p.created_at, u.username, u.id as user_id
+    ''' Also getting the posts content posted by the users' following.'''
+    followed_users_content = query_db('''
+            SELECT p.content
             FROM posts p 
             JOIN users u 
             ON p.user_id = u.id
-            WHERE p.user_id != ? AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?)
-            ORDER BY p.created_at DESC 
-            LIMIT 5
+            WHERE p.user_id != ? AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?) 
         ''', (user_id, user_id))
 
-        ''' If the user has not followed anyone. Just recommend the latest post from platform.'''
-        if not followed_posts_content:
-            return query_db('''
+    ''' If no posts were liked and no user was followed. Recommending the latest posts from platform.'''
+    if not liked_posts_content and not followed_users_content:
+        return query_db('''
                 SELECT p.id, p.content, p.created_at, u.username, u.id as user_id
                 FROM posts p 
                 JOIN users u 
@@ -1144,22 +1138,30 @@ def recommend(user_id, filter_following):
                 ORDER BY p.created_at DESC
                 LIMIT 5
             ''', (user_id,))
-        return followed_posts_content
+   
+    ''' If liked posts/ followed posts are available. Then let's create an algo to recommend similar posts '''
 
-    ''' If liked posts are available. Then let's create an algo to recommend similar posts '''
-
+    'The code below is almost the same that of given in the solution of Exercise 13. '
+    'Only few changes were required in the original code to attain the objective of Homework 3 Task 3.'
     #Finding the most common words from the posts they liked
     word_counts = collections.Counter()
     # Added the complete list of stop words from nltk library
     stop_words = {'a', 'about', 'above', 'after', 'again', 'against', 'ain', 'all', 'am', 'an', 'and', 'any', 'are', 'aren', "aren't", 'as', 'at', 'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but', 'by', 'can', 'couldn', "couldn't", 'd', 'did', 'didn', "didn't", 'do', 'does', 'doesn', "doesn't", 'doing', 'don', "don't", 'down', 'during', 'each', 'few', 'for', 'from', 'further', 'had', 'hadn', "hadn't", 'has', 'hasn', "hasn't", 'have', 'haven', "haven't", 'having', 'he', "he'd", "he'll", "he's", 'her', 'here', 'hers', 'herself', 'him', 'himself', 'his', 'how', 'i', "i'd", "i'll", "i'm", "i've", 'if', 'in', 'into', 'is', 'isn', "isn't", 'it', "it'd", "it'll", "it's", 'its', 'itself', 'just', 'll', 'm', 'ma', 'me', 'mightn', "mightn't", 'more', 'most', 'mustn', "mustn't", 'my', 'myself', 'needn', "needn't", 'no', 'nor', 'not', 'now', 'o', 'of', 'off', 'on', 'once', 'only', 'or', 'other', 'our', 'ours', 'ourselves', 'out', 'over', 'own', 're', 's', 'same', 'shan', "shan't", 'she', "she'd", "she'll", "she's", 'should', "should've", 'shouldn', "shouldn't", 'so', 'some', 'such', 't', 'than', 'that', "that'll", 'the', 'their', 'theirs', 'them', 'themselves', 'then', 'there', 'these', 'they', "they'd", "they'll", "they're", "they've", 'this', 'those', 'through', 'to', 'too', 'under', 'until', 'up', 've', 'very', 'was', 'wasn', "wasn't", 'we', "we'd", "we'll", "we're", "we've", 'were', 'weren', "weren't", 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'will', 'with', 'won', "won't", 'wouldn', "wouldn't", 'y', 'you', "you'd", "you'll", "you're", "you've", 'your', 'yours', 'yourself', 'yourselves'}
     
     for post in liked_posts_content:
-        # Use regex to find all words in the post content
+        # Use regex to find all words in the reacted post content
         words = re.findall(r'\b\w+\b', post['content'].lower())
         for word in words:
             if word not in stop_words and len(word) > 2:
                 word_counts[word] += 1
     
+    for post in followed_users_content:
+        # Use regex to find all words in the followed post content
+        words = re.findall(r'\b\w+\b', post['content'].lower())
+        for word in words:
+            if word not in stop_words and len(word) > 2:
+                word_counts[word] += 1
+
     top_keywords = [word for word, _ in word_counts.most_common(10)]
 
     print(top_keywords)
