@@ -1107,11 +1107,91 @@ def recommend(user_id, filter_following):
     - https://www.researchgate.net/publication/227268858_Recommender_Systems_Handbook
     """
 
-    recommended_posts = {} 
+    recommended_posts = []
 
-    #to be solved yet.
+    'The code below is almost the same that of given in the solution of Exercise 13. '
+    'Only few changes were required in the original code to attain the objective of Homework 3 Task 3.'
+    
+    ''' Prioriting the posts which were positively reacted by the user.'''
+    liked_posts_content = query_db('''
+        SELECT p.content 
+        FROM posts p
+        JOIN reactions r 
+        ON p.id = r.post_id
+        WHERE r.user_id = ? AND r.reaction_type IN ('like','love','haha')
+    ''', (user_id,))
 
-    return recommended_posts;
+    ''' If no posts were liked. Recommending the latest posts of the followed user.'''
+    if not liked_posts_content:
+        followed_posts_content = query_db('''
+            SELECT p.id, p.content, p.created_at, u.username, u.id as user_id
+            FROM posts p 
+            JOIN users u 
+            ON p.user_id = u.id
+            WHERE p.user_id != ? AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?)
+            ORDER BY p.created_at DESC 
+            LIMIT 5
+        ''', (user_id, user_id))
+
+        ''' If the user has not followed anyone. Just recommend the latest post from platform.'''
+        if not followed_posts_content:
+            return query_db('''
+                SELECT p.id, p.content, p.created_at, u.username, u.id as user_id
+                FROM posts p 
+                JOIN users u 
+                ON p.user_id = u.id
+                WHERE  p.user_id != ?
+                ORDER BY p.created_at DESC
+                LIMIT 5
+            ''', (user_id,))
+        return followed_posts_content
+
+    ''' If liked posts are available. Then let's create an algo to recommend similar posts '''
+
+    #Finding the most common words from the posts they liked
+    word_counts = collections.Counter()
+    # Added the complete list of stop words from nltk library
+    stop_words = {'a', 'about', 'above', 'after', 'again', 'against', 'ain', 'all', 'am', 'an', 'and', 'any', 'are', 'aren', "aren't", 'as', 'at', 'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but', 'by', 'can', 'couldn', "couldn't", 'd', 'did', 'didn', "didn't", 'do', 'does', 'doesn', "doesn't", 'doing', 'don', "don't", 'down', 'during', 'each', 'few', 'for', 'from', 'further', 'had', 'hadn', "hadn't", 'has', 'hasn', "hasn't", 'have', 'haven', "haven't", 'having', 'he', "he'd", "he'll", "he's", 'her', 'here', 'hers', 'herself', 'him', 'himself', 'his', 'how', 'i', "i'd", "i'll", "i'm", "i've", 'if', 'in', 'into', 'is', 'isn', "isn't", 'it', "it'd", "it'll", "it's", 'its', 'itself', 'just', 'll', 'm', 'ma', 'me', 'mightn', "mightn't", 'more', 'most', 'mustn', "mustn't", 'my', 'myself', 'needn', "needn't", 'no', 'nor', 'not', 'now', 'o', 'of', 'off', 'on', 'once', 'only', 'or', 'other', 'our', 'ours', 'ourselves', 'out', 'over', 'own', 're', 's', 'same', 'shan', "shan't", 'she', "she'd", "she'll", "she's", 'should', "should've", 'shouldn', "shouldn't", 'so', 'some', 'such', 't', 'than', 'that', "that'll", 'the', 'their', 'theirs', 'them', 'themselves', 'then', 'there', 'these', 'they', "they'd", "they'll", "they're", "they've", 'this', 'those', 'through', 'to', 'too', 'under', 'until', 'up', 've', 'very', 'was', 'wasn', "wasn't", 'we', "we'd", "we'll", "we're", "we've", 'were', 'weren', "weren't", 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'will', 'with', 'won', "won't", 'wouldn', "wouldn't", 'y', 'you', "you'd", "you'll", "you're", "you've", 'your', 'yours', 'yourself', 'yourselves'}
+    
+    for post in liked_posts_content:
+        # Use regex to find all words in the post content
+        words = re.findall(r'\b\w+\b', post['content'].lower())
+        for word in words:
+            if word not in stop_words and len(word) > 2:
+                word_counts[word] += 1
+    
+    top_keywords = [word for word, _ in word_counts.most_common(10)]
+
+    print(top_keywords)
+
+    # Defining query and user IDs to extract the post later
+    query = "SELECT p.id, p.content, p.created_at, u.username, u.id as user_id FROM posts p JOIN users u ON p.user_id = u.id"
+    params = []
+    
+    # If 'filter_following' input argument is set to True outside the function, it will extend the query to only recommend content from followed users.
+    if filter_following:
+        query += " WHERE p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?)"
+        params.append(user_id)
+        
+    #  Using query_db() to find all the posts, with already defined input arguments above
+    all_other_posts = query_db(query, tuple(params))
+    
+    # Selecting all the posts already liked by the user, so it should not be recommended again (to avoid content repitition)
+    liked_post_ids = {post['id'] for post in query_db('SELECT post_id as id FROM reactions WHERE user_id = ?', (user_id,))}
+
+    #Skipping posts already liked or posted by the same user.
+    for post in all_other_posts:
+        if post['id'] in liked_post_ids or post['user_id'] == user_id:
+            continue
+        # Otherwise, checking if the post content contans key words and then adding it to the recommended list
+        if any(keyword in post['content'].lower() for keyword in top_keywords):
+            recommended_posts.append(post)
+
+    # Sorting the recommended posts based on the post creation
+    recommended_posts.sort(key=lambda p: p['created_at'], reverse=True)
+
+    # Returning only 5 top posts.
+    return recommended_posts[:5];
 
 
 if __name__ == '__main__':
