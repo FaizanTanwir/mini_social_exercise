@@ -7,6 +7,14 @@ import sqlite3
 import hashlib
 import re
 from datetime import datetime
+from gensim.corpora import Dictionary
+from gensim.models.ldamodel import LdaModel
+from gensim.models.coherencemodel import CoherenceModel
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
+import nltk
+import pandas as pd
 
 app = Flask(__name__)
 app.secret_key = '123456789' 
@@ -1195,7 +1203,93 @@ def recommend(user_id, filter_following):
     # Returning only 5 top posts.
     return recommended_posts[:5];
 
+# Task 4.1
+def popular_topics(posts):
+    # Download necessary NLTK data, without these the below functions wouldn't work
+    nltk.download('punkt')
+    nltk.download('punkt_tab')
+    nltk.download('stopwords')
+    nltk.download('wordnet')
+
+    # Get a basic stopword list
+    stop_words = stopwords.words('english')
+
+    # Add extra words to make our analysis even better
+    stop_words.extend(['would', 'best', 'always', 'amazing', 'bought', 'quick' 'people', 'new', 'fun', 'think', 'know', 'believe', 'many', 'thing', 'need', 'small', 'even', 'make', 'love', 'mean', 'fact', 'question', 'time', 'reason', 'also', 'could', 'true', 'well',  'life', 'said', 'year', 'going', 'good', 'really', 'much', 'want', 'back', 'look', 'article', 'host', 'university', 'reply', 'thanks', 'mail', 'post', 'please'])
+
+    # this object will help us lemmatise words (i.e. get the word stem)
+    lemmatizer = WordNetLemmatizer()
+
+    # after the below for loop, we will transform each post into "bags of words" where each BOW is a set of words from one post 
+    bow_list = []
+
+    for _, row in posts.iterrows():
+        text = row['content']
+        tokens = word_tokenize(text.lower()) # tokenise (i.e. get the words from the post)
+        tokens = [lemmatizer.lemmatize(t) for t in tokens] # lemmatise
+        tokens = [t for t in tokens if len(t) > 2]  # filter out words with less than 3 letter s
+        tokens = [t for t in tokens if t.isalpha() and t not in stop_words] # filter out stopwords
+        # if there's at least 1 word left for this post, append to list
+        if len(tokens) > 0:
+            bow_list.append(tokens)
+
+    #print(f'bow_list: {bow_list}')
+
+    # Create dictionary and corpus
+    dictionary = Dictionary(bow_list)
+
+    #print(f'dictionary: {dictionary}')
+
+    # Filter words that appear less than 2 times or in more than 30% of posts
+    dictionary.filter_extremes(no_below=2, no_above=0.3)
+    corpus = [dictionary.doc2bow(tokens) for tokens in bow_list]
+
+    #print(f'corpus: {corpus}')
+          
+    # Okay, we selected the 10 topics. Let's see how our trained LDA model for the optimal number of topics performed.
+    optimal_k = 10
+    optimal_lda = LdaModel(corpus, num_topics=optimal_k, id2word=dictionary, passes=10, random_state=2)
+    coherence_model = CoherenceModel(model=optimal_lda, texts=bow_list, dictionary=dictionary, coherence='c_v')
+    optimal_coherence = coherence_model.get_coherence()     
+
+    # First, to see the topics, print top 10 most representative words per topic
+    # print(f'These are the words most representative of each of the {optimal_k} topics:')
+    # for i, topic in optimal_lda.print_topics(num_words=10):
+    #     print(f"Topic {i}: {topic}\n")
+
+    # Manually assigned themes based on the top words
+    topic_themes = [
+        "Climate Change",
+        "DIY",
+        "Coffee",
+        "Nature",
+        "Sports and Games",
+        "Book Reading",
+        "Mental Health and Self Care",
+        "Discussion on Mental Health",
+        "Tech Events",
+        "Philosophy"
+    ]
+
+    # Then, let's determine how many posts we have for each topic
+    # Count the dominant topic for each document
+    topic_counts = [0] * optimal_k  # one counter per topic
+    for bow in corpus:
+        topic_dist = optimal_lda.get_document_topics(bow)  # list of (topic_id, probability)
+        dominant_topic = max(topic_dist, key=lambda x: x[1])[0] # find the top probability
+        topic_counts[dominant_topic] += 1 # add 1 to the most probable topic's counter
+
+    # Display the topic counts
+    for i, count in enumerate(topic_counts):
+        theme = topic_themes[i]
+        print(f"Topic {i} ({theme}): {count} posts")
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8080)
+    # Load the content of the posts
+    with app.app_context():
+        data = query_db("SELECT content FROM posts")
+        posts = pd.DataFrame(data, columns=["content"])
+        popular_topics(posts)
+    
+    app.run(debug=True, use_reloader=False, port=8080)
 
