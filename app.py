@@ -4,17 +4,18 @@ from cryptography.fernet import Fernet
 import collections
 import json
 import sqlite3
+import pandas as pd
 import hashlib
 import re
 from datetime import datetime
 from gensim.corpora import Dictionary
 from gensim.models.ldamodel import LdaModel
 from gensim.models.coherencemodel import CoherenceModel
+import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
-import nltk
-import pandas as pd
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 app = Flask(__name__)
 app.secret_key = '123456789' 
@@ -1222,6 +1223,7 @@ def popular_topics(posts):
 
     # after the below for loop, we will transform each post into "bags of words" where each BOW is a set of words from one post 
     bow_list = []
+    clean_texts = []
 
     for _, row in posts.iterrows():
         text = row['content']
@@ -1232,8 +1234,12 @@ def popular_topics(posts):
         # if there's at least 1 word left for this post, append to list
         if len(tokens) > 0:
             bow_list.append(tokens)
+            clean_texts.append(" ".join(tokens))
+        else:
+            clean_texts.append("")
 
     #print(f'bow_list: {bow_list}')
+    #print(f'clean_texts: {clean_texts}')
 
     # Create dictionary and corpus
     dictionary = Dictionary(bow_list)
@@ -1274,22 +1280,83 @@ def popular_topics(posts):
     # Then, let's determine how many posts we have for each topic
     # Count the dominant topic for each document
     topic_counts = [0] * optimal_k  # one counter per topic
+    # Assign dominant topic for each post
+    dominant_topics = []
     for bow in corpus:
         topic_dist = optimal_lda.get_document_topics(bow)  # list of (topic_id, probability)
-        dominant_topic = max(topic_dist, key=lambda x: x[1])[0] # find the top probability
+        if topic_dist:
+            dominant_topic = max(topic_dist, key=lambda x: x[1])[0] # find the top probability
+        else:
+            None
+        dominant_topics.append(dominant_topic)
         topic_counts[dominant_topic] += 1 # add 1 to the most probable topic's counter
+
+    posts['clean_text'] = clean_texts
+    posts['topic_id'] = dominant_topics
+    posts['topic_name'] = posts['topic_id'].apply(lambda i: topic_themes[i] if i is not None else "Unknown")
+
+    #print(posts)
 
     # Display the topic counts
     for i, count in enumerate(topic_counts):
         theme = topic_themes[i]
         print(f"Topic {i} ({theme}): {count} posts")
 
+    return posts
+
+# Task 4.2
+def sentiment_analysis(posts, comments):
+    nltk.download('vader_lexicon')
+    sia = SentimentIntensityAnalyzer()
+
+    # Compute sentiment for each post
+    posts['sentiment'] = posts['content'].apply(lambda x: sia.polarity_scores(x)['compound'])
+
+    # Compute sentiment for each post
+    comments['sentiment'] = comments['content'].apply(lambda x: sia.polarity_scores(x)['compound'])
+
+    # Overall tone of the posts
+    post_overall_sentiment = posts['sentiment'].mean()
+    print(f"\n🌍 Overall Tone of the Platform (Posts): {post_overall_sentiment:.3f}")
+    if post_overall_sentiment > 0.05:
+        print("→ The overall tone of Posts is Positive 😊")
+    elif post_overall_sentiment < -0.05:
+        print("→ The overall tone of Posts is Negative 😞")
+    else:
+        print("→ The overall tone of Posts is Neutral 😐")
+
+    # Overall tone of the comments
+    comment_overall_sentiment = comments['sentiment'].mean()
+    print(f"\n🌍 Overall Tone of the Platform (Comments): {comment_overall_sentiment:.3f}")
+    if comment_overall_sentiment > 0.05:
+        print("→ The overall tone of Comments is Positive 😊")
+    elif comment_overall_sentiment < -0.05:
+        print("→ The overall tone of Comments is Negative 😞")
+    else:
+        print("→ The overall tone of Comments is Neutral 😐")
+
+    # print(comments)
+    # print(posts)
+
+    # Average sentiment per topic
+    sentiment_by_topic = posts.groupby('topic_name')['sentiment'].mean().sort_values(ascending=False)
+    print("\n📊 Sentiment by Topic:")
+    for topic, score in sentiment_by_topic.items():
+        tone = "Positive" if score > 0.05 else "Negative" if score < -0.05 else "Neutral"
+        print(f"  - {topic}: {score:.3f} ({tone})")
+
+    return sentiment_by_topic
+
 if __name__ == '__main__':
     # Load the content of the posts
     with app.app_context():
-        data = query_db("SELECT content FROM posts")
-        posts = pd.DataFrame(data, columns=["content"])
-        popular_topics(posts)
+        post_data = query_db("SELECT content FROM posts")
+        posts = pd.DataFrame(post_data, columns=["content"])
+
+        comment_data = query_db("SELECT content FROM comments")
+        comments = pd.DataFrame(comment_data, columns=["content"])
+
+        post = popular_topics(posts)
+        sentiment_analysis(post, comments)
     
     app.run(debug=True, use_reloader=False, port=8080)
-
