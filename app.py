@@ -277,6 +277,44 @@ def delete_post(post_id):
     # Redirect back to the page the user came from, or the feed as a fallback
     return redirect(request.referrer or url_for('feed'))
 
+@app.route('/posts/<int:post_id>/report_post', methods=['POST'])
+def report_post(post_id):
+    """Handles reporting a post."""
+    user_id = session.get('user_id')
+
+    # Block access if user is not logged in
+    if not user_id:
+        flash('You must be logged in to report a post.', 'danger')
+        return redirect(url_for('login'))
+
+    # Find the post in the database
+    post = query_db('SELECT id, user_id FROM posts WHERE id = ?', (post_id,), one=True)
+
+    # Find the post in the database
+    if not post:
+        flash('Post not found.', 'danger')
+        return redirect(url_for('feed'))
+
+    if post['user_id'] == user_id:
+        flash('You cannot report your own post.', 'danger')
+        return redirect(request.referrer)
+
+    # Check if the user already submitted a report
+    report = query_db('SELECT * FROM post_reports WHERE reporter_id = ? AND post_id = ?', (user_id, post_id,), one=True)
+    if report:
+        flash('You already submitted a report for this post.', 'danger')
+        return redirect(request.referrer)
+
+    # If all checks pass, proceed with report
+    db = get_db()
+    db.execute('INSERT INTO post_reports (post_id, reporter_id) VALUES (?, ?)', (post_id, user_id))
+    db.commit()
+
+    flash('The post was successfully reported.', 'success')
+
+    # Redirect back to the page the user came from, or the feed as a fallback
+    return redirect(request.referrer or url_for('feed'))
+
 @app.route('/u/<username>')
 def user_profile(username):
     """Displays a user's profile page with moderated bio, posts, and latest comments."""
@@ -739,10 +777,24 @@ def admin_dashboard():
     total_posts_pages = (total_posts_count + PAGE_SIZE - 1) // PAGE_SIZE
 
     posts_raw = query_db(f'''
-        SELECT p.id, p.content, p.created_at, u.username, u.created_at as user_created_at
-        FROM posts p JOIN users u ON p.user_id = u.id
-        ORDER BY p.id DESC -- Order by ID for consistent pagination before risk sort
-        LIMIT ? OFFSET ?
+      SELECT 
+          p.id, 
+          p.content, 
+          p.created_at, 
+          u.username, 
+          u.created_at as user_created_at,
+          COUNT(pr.id) as report_count 
+      FROM 
+          posts p 
+      JOIN 
+          users u ON p.user_id = u.id
+      LEFT JOIN 
+          post_reports pr ON p.id = pr.post_id
+      GROUP BY 
+          p.id
+      ORDER BY 
+          p.id DESC
+      LIMIT ? OFFSET ?
     ''', (PAGE_SIZE, posts_offset))
     posts = []
     for post in posts_raw:

@@ -20,6 +20,14 @@
         </div>
         {% else %}
         <small class="text-muted">{{ post.created_at|datetimeformat }}</small>
+        {% if session.get('user_id') %}
+        <div class="ms-2">
+             <form action="{{ url_for('report_post', post_id=post.id) }}" method="POST">
+                <button type="submit" class="btn btn-danger btn-sm" title="Report Post">
+                    Report
+                </button>
+            </form>
+        </div>
         {% endif %}
       </div>
       

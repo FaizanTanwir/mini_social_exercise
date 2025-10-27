@@ -72,7 +72,16 @@
             </form>
         </div>
         {% else %}
-        <small class="text-muted">{{ entry.post.created_at|datetimeformat }}</small>
+            <div class="d-flex align-items-center">
+                <small class="text-muted me-3">{{ entry.post.created_at|datetimeformat }}</small>
+
+                {% if session.get('user_id') %}
+                <!-- ✅ Report Button -->
+                <form action="{{ url_for('report_post', post_id=entry.post.id) }}" method="POST" class="d-inline">
+                    <button type="submit" class="btn btn-sm btn-warning" title="Report Post">Report</button>
+                </form>
+                {% endif %}
+            </div>
         {% endif %}
       </div>
       
